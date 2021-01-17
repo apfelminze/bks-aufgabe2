@@ -11,7 +11,6 @@ public class Client implements Runnable {
 
 	Thread receiveDataThread = null;
 	DatagramSocket socket = null; 
-	
 	public int port;
 	public String location;
 	public String temperature;
@@ -26,9 +25,8 @@ public class Client implements Runnable {
 		setTempAndHumidity();
 		this.lastUpdateTime = new Date().getTime(); 
 		System.out.println("location: " + location);
-		System.out.println("temperature: " + this.temperature + " °C");
+		System.out.println("temperature: " + this.temperature + " degrees (Celsius)");
 		System.out.println("humidity: " + this.humidity + " %");
-		// initialize peer data arraylist
 		
 		// set port, initialize socket
 	    socket = getFreePort();
@@ -40,12 +38,15 @@ public class Client implements Runnable {
  		System.out.println("uses port: " + this.port);
 		socket.setBroadcast(true);
 		
-		// open receiveDataThread thread
-		receiveDataThread = new Thread(this, "my runnable thread");
-	    System.out.println("my thread created" + receiveDataThread);
+		// open thread to receive the data packets
+		receiveDataThread = new Thread(this, "thread for receiving data");
+	    // System.out.println("my thread created" + receiveDataThread);
 	    receiveDataThread.start();
 }
 
+	/**
+	 * creates random values for this client's initial temperature and humidity
+	 */
 public void setTempAndHumidity() {
 		// between -50 and +50 degrees
 			double temp = (double) Math.round((Math.random() * 100 - 50) * 100d) / 100d; // two decimal numbers max
@@ -57,6 +58,11 @@ public void setTempAndHumidity() {
 		    this.humidity = humidityS;
 }
 
+/**
+ * tries to initialize the DatagramSocket socket attribute with one of the ports in the range
+ * @return a DatagramSocket to be used by this client for communicating
+ * @throws Exception if this port is not free
+ */
 public DatagramSocket getFreePort() {
 	for(int i=50001; i<50011; i++) {
 		try {
@@ -69,19 +75,21 @@ public DatagramSocket getFreePort() {
 	return socket;
 }
 
-
+/**
+ * run() method for the thread receiveDataThread
+ */
 public void run() {
-	// send requests to other clients
 	// receive and store data
 	receive(this.socket);
 }
 
-
+/**
+ * listens on the socket for incoming data; checks validity of data; calls storePeerData() method
+ * @param socket the socket used for receiving packets by this client
+ * @throws IOException
+ */
 public void receive(DatagramSocket socket)  {
-	System.out.println("enter receive() \n");
-	// Strings: The = = operator compares references not values.
-	// The String equals() method compares the original content of the string
-	// s1.equals(s2)
+	// System.out.println("enter receive() \n");
 	try {
 	while(true) {
 		// length of data packet: 20 letters of location -> 40 bytes, 3 longs -> 24 bytes, 3 semicolons -> 6 bytes ==> 70bytes
@@ -93,37 +101,45 @@ public void receive(DatagramSocket socket)  {
 		// System.out.println("received message: " + receivedMessage);
 		String[] receivedStrings = receivedMessage.split(";");
 		String location = receivedStrings[0];
+		// Strings: The = = operator compares references not values. The equals() method compares the content of the string
 		if(location.equals(this.location)) {
 			// don't save any received status information that refers to our own location/client
 			continue;
 		}
 		long time = Long.parseLong(receivedStrings[1]);
 		if(!validTime(time, currentTime)) {
-			System.out.println("packet came from future - return");
+			System.out.println("packet came from future; waiting for another one\n");
 			continue;
 		}
 		double temperature = Double.parseDouble(receivedStrings[2]);
 		if(!validTemperature(temperature)) {
-			System.out.println("it cannot possibly be so hot/cold according to our rules - return");
+			System.out.println("it cannot possibly be so hot/cold according to our rules; waiting for another packet\n");
 			continue;
 		}
 		double humidity = Double.parseDouble(receivedStrings[3]);
 		if(!validHumidity(humidity)) {
-			System.out.println("received a percentage under 0 or above 100 - return");
+			System.out.println("received a percentage under 0 or above 100; waiting for another packet");
 			continue;
 		}
 		storePeerData(location, time, temperature, humidity);
 	}
 	} catch (IOException e) {
-		System.out.println("socket could not receive datagram packet: ");
+		System.out.println("socket could not receive datagram packet: \n");
 		e.printStackTrace();
 	}
 }
 
+/**
+ * Stores the incoming data of one foreign client into this client's arraylist peerData 
+ * @param location of foreign client
+ * @param time when foreign client's packet was created (number of milliseconds since January 1, 1970, 00:00:00 GMT)
+ * @param temperature of foreign client
+ * @param humidity of foreign client
+ */
 
 public void storePeerData(String location, long time, double temperature, double humidity) {
-	// store data of a client
-	// check if we already have an entry for this client
+	// store data of a foreign client
+	// check if we already have an entry for this client in peerData
 	for(int i=0; i<peerData.size(); i++) {
 		ArrayList<String> oneArray = this.peerData.get(i);
 		String existingLocation = oneArray.get(0);
@@ -133,18 +149,18 @@ public void storePeerData(String location, long time, double temperature, double
 			if(Long.parseLong(existingTime) < time) {
 				// the entry we already have is older than the new information
 				oneArray.set(1, Long.toString(time)); // new time
-				oneArray.set(2, Double.toString(temperature)); // new temp
+				oneArray.set(2, Double.toString(temperature)); // new temperature
 				oneArray.set(3, Double.toString(humidity)); // new humidity
 				peerData.set(i, oneArray);
 				System.out.println("peer list: " + peerData + "\n");
 				return;
 			}
 			else if((Long.parseLong(existingTime) == time) || (Long.parseLong(existingTime) > time)) {
-				return; // new info is not newer
+				return; // entry with this location already exists, but is not older than current data
 			}
 		}
 	}
-	// Peer is not yet in the ArrayList peerData --> add entry for Peer
+	// Client is not yet in the ArrayList peerData --> add entry
 	ArrayList<String> newPeer = new ArrayList<String>();
 	// ArrayList.set() only to replace; ArrayList.add() to save new elements
 	newPeer.add(0, location);
@@ -179,11 +195,16 @@ public static void main(String[] args) throws IOException {
 	}
 }
 
+/**
+ * determines the current time and calls sendCustomPackage() as well as sendAllForeignPackages() with it
+ * @throws IOException
+ * @throws UnknownHostException
+ */
 public void send() throws IOException, UnknownHostException {
 		while(true) {
 			long timeLeft = -1;
 			do {
-				currentTime = new Date().getTime();
+				currentTime = new Date().getTime(); // number of milliseconds since January 1, 1970, 00:00:00 GMT 
 				timeLeft = 30000 - (currentTime - this.lastUpdateTime); // have more than 30.000 milliseconds passed? yes if timeLeft <= 0
 				sendCustomPackage(currentTime);
 				sendAllForeignPackages(currentTime);
@@ -192,6 +213,10 @@ public void send() throws IOException, UnknownHostException {
 		}
 }
 
+/**
+ * Sends this client's own data to all the ports in the range, except this client's own port
+ * @param currentTime time when the send() method was called (number of milliseconds since January 1, 1970, 00:00:00 GMT)
+ */
 public void sendCustomPackage(long currentTime) {
 	try {
 		String currentTimeString = Long.toString(currentTime);
@@ -205,8 +230,8 @@ public void sendCustomPackage(long currentTime) {
 			if(this.port == i) {
 			continue;
 			}
-		DatagramPacket packet = new DatagramPacket(data, packetLength, address, i);
 		// Constructs a datagram packet for sending packets of length length to the specified port number on the specified host.
+		DatagramPacket packet = new DatagramPacket(data, packetLength, address, i);
 		this.socket.send(packet);
 		}	
 	} catch(UnknownHostException e) {
@@ -217,11 +242,17 @@ public void sendCustomPackage(long currentTime) {
 	}
 }
 
-public void sendAllForeignPackages(long currentTime) {
+/**
+ * Sends all valid data of foreign clients (saved in peerData arraylist) to all the ports in the range, except this client's own port
+ * @param currentTime time when the send() method was called (number of milliseconds since January 1, 1970, 00:00:00 GMT)
+ * @throws UnknownHostException
+ * @throws IOException
+ */
+
+public void sendAllForeignPackages(long currentTime) throws UnknownHostException, IOException {
 	try {
 	// System.out.println("enter send foreign package\n");
-	// 	public ArrayList<ArrayList<String>> peerData = new ArrayList<>(9);
-		// ArrayList.size() gives number of elements, not number of space
+	// ArrayList.size() gives number of elements, not size (capacity) of arraylist
 	for(int i=0; i<peerData.size(); i++) {
 		ArrayList<String> oneArray = peerData.get(i);
 		String message = "";
@@ -268,7 +299,6 @@ public void sendAllForeignPackages(long currentTime) {
 			continue;
 			}
 			DatagramPacket packet = new DatagramPacket(data, packetLength, address, j);
-		// Constructs a datagram packet for sending packets of length length to the specified port number on the specified host.
 			this.socket.send(packet);
 		}	
 	}
@@ -280,13 +310,23 @@ public void sendAllForeignPackages(long currentTime) {
 	}
 }
 
-public void renew() throws UnknownHostException, IOException {
+/**
+ * Renews the values for this client's temperature and humidity, as well as lastUpdateTime
+ * @throws UnknownHostException
+ * @throws IOException
+ */
+public void renew() throws IOException {
 	setTempAndHumidity();
-	System.out.println("new temperature: " + this.temperature + " °C");
+	System.out.println("new temperature: " + this.temperature + " degrees (Celsius)");
 	System.out.println("new humidity: " + this.humidity + " %");
 	this.lastUpdateTime = new Date().getTime(); 
 }
 
+/**
+ * Checks temperature value for validity
+ * @param temp temperature value to be checked
+ * @return true if temperature is valid
+ */
 public boolean validTemperature(double temp) {
 	// between -50 and +50 degrees
 	if(temp >= -50 && temp <= 50) {
@@ -297,6 +337,11 @@ public boolean validTemperature(double temp) {
 	}
 }
 
+/**
+ * Checks humidity value for validity
+ * @param hum humidity value to be checked
+ * @return true if valid
+ */
 public boolean validHumidity(double hum) {
 	// between 0 and 100%
 	if(hum >= 0 && hum <= 100) {
@@ -307,6 +352,12 @@ public boolean validHumidity(double hum) {
 	}
 }
 
+/**
+ * Checks time value for validity
+ * @param time value to be checked
+ * @param currentTime value to be compared to
+ * @return true if time param is not in the future
+ */
 public boolean validTime(long time, long currentTime) {
 	if(time > currentTime) {
 		return false;
